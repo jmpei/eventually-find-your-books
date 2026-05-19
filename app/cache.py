@@ -1,6 +1,5 @@
-import asyncio
-import aioredis
 import json
+from redis import asyncio as aioredis
 from app.config import settings
 
 redis = None
@@ -8,7 +7,7 @@ redis = None
 async def get_redis():
     global redis
     if redis is None:
-        redis = await aioredis.from_url(settings.redis_url, decode_responses=True)
+        redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     return redis
 
 async def get_cached_recommendations(user_id: str):

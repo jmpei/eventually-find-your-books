@@ -1,8 +1,9 @@
 fastapi
 uvicorn[standard]
 boto3
-aioredis==2.0.1
+redis>=4.2
 pydantic
+pydantic-settings
 numpy
 scipy
 python-dotenv
