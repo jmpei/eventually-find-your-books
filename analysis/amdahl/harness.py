@@ -49,6 +49,11 @@ def query_prefix(table, prefix):
 def run_once(table, n_workers):
     """One scatter-gather pass at N workers. Returns (parse_s, aggregate_s, total_s)."""
     t0 = time.perf_counter()
+    # We deliberately share ONE boto3 Table across worker threads. boto3 resource
+    # objects are not formally thread-safe, but here every call is a read-only
+    # query() whose actual I/O goes through urllib3's thread-safe connection pool.
+    # Sharing avoids per-thread connection setup, which would otherwise be counted
+    # inside parse_s and distort the speedup measurement.
     with ThreadPoolExecutor(max_workers=n_workers) as ex:
         shards = list(ex.map(lambda p: query_prefix(table, p), PREFIXES))
     parse_s = time.perf_counter() - t0  # parallel fan-out wall time
@@ -68,7 +73,7 @@ def sweep(table, worker_counts, repeats):
     for n in worker_counts:
         samples = [run_once(table, n) for _ in range(repeats)]
         samples.sort(key=lambda s: s[2])
-        medians[n] = samples[len(samples) // 2]  # median by total_s
+        medians[n] = samples[(len(samples) - 1) // 2]  # lower-median by total_s
     base_total = medians[worker_counts[0]][2]
     rows = []
     for n in worker_counts:
@@ -89,6 +94,8 @@ def main():
 
     table = _table(args.endpoint_url, args.region)
     worker_counts = [int(x) for x in args.workers.split(",")]
+    if worker_counts[0] != 1:
+        raise SystemExit("--workers must start with 1 so speedup is normalized to T(1)")
     rows = sweep(table, worker_counts, args.repeats)
 
     RESULTS_DIR.mkdir(exist_ok=True)
