@@ -41,24 +41,55 @@ checks) and `analyze_data.py` (statistical analysis: language
 distribution, year buckets, top subjects, rating coverage).
 
 ### 5. Amdahl's Law Analysis Pipeline
-Designed cross-validation methodology to derive sharding serial 
-fraction `f` via two independent methods:
-- (1) Least-squares fit over measured speedups at N = 1/16/26 ECS shards
-- (2) Per-request phase profiling via `X-Phase-Parse` / `Aggregate` / 
-      `Total` response headers
+Built a reproducible scatter-gather harness (`analysis/amdahl/harness.py`)
+that drives N concurrent worker threads querying all 27 `TitlePrefixIndex`
+partitions (A–Z + "0") and records per-phase timings: fan-out wall time
+(`parse_s`), serial merge + ranking (`aggregate_s`), and total (`total_s`).
+The harness sweeps N ∈ {1, 2, 4, 8, 16, 26}, takes the median over 5 repeats
+per N, and writes `analysis/amdahl/results/speedup.csv`.
 
-This isolates fan-out overhead and load imbalance from inherent 
-serial sections.
+`analysis/amdahl/fit.py` estimates the serial fraction `f` via two
+independent cross-validated methods:
+- (1) Closed-form linearized least-squares fit of the measured speedup curve
+      to Amdahl's Law — no external solver required.
+- (2) Phase-profiling: `f ≈ aggregate_s / total_s` at N = 1, where the
+      merge step is the only component that does not shrink with more workers.
+
+Both estimates and their cross-validation gap are printed to stdout;
+`fit.py` also renders the measured points overlaid with the fitted Amdahl
+curve (`results/speedup.png`).
+
+**Honest framing:** the original production study ran on AWS ECS at
+N = 1 / 16 / 26 tasks, but those raw run logs were not retained. This harness
+reproduces the methodology at local scale (DynamoDB Local) and regenerates
+the speedup curve and `f` estimate — absolute numbers differ from the ECS
+run; the analysis method is identical.
 
 ## Files I Authored
 ```
+data-processing/
+├── extract_works_clean.py      ← strict ETL filter
+├── extract_works_loose.py      ← relaxed ETL filter (final pipeline)
+├── update_book_ratings.py      ← rating join + popularity ranking
+├── validate_jsonl.py           ← schema validation
+└── analyze_data.py             ← dataset statistics
 
-data-processing/ ├── extract_works_clean.py ← strict ETL filter ├── extract_works_loose.py ← relaxed ETL filter (final pipeline) ├── update_book_ratings.py ← rating join + popularity ranking ├── validate_jsonl.py ← schema validation └── analyze_data.py ← dataset statistics
+scripts/
+├── load_books_to_dynamodb.py   ← Books table batch loader
+└── load_ratings_to_dynamodb.py ← Ratings table batch loader
 
-scripts/ ├── load_books_to_dynamodb.py ← Books table batch loader └── load_ratings_to_dynamodb.py ← Ratings table batch loader
+infrastructure/
+├── dynamodb.tf                 ← 3 tables + 3 GSIs + PITR + SSE
+└── main.tf                     ← AWS provider config
 
-infra/ ├── dynamodb.tf ← 3 tables + 3 GSIs + PITR + SSE └── main.tf ← AWS provider config
+analysis/amdahl/
+├── harness.py                  ← scatter-gather sweep; writes results/speedup.csv
+├── fit.py                      ← Amdahl fit, phase profiling, speedup plot
+└── README.md                   ← methodology and run instructions
 
+tests/
+├── test_amdahl_fit.py          ← unit tests for fit.py estimators
+└── test_etl_transforms.py      ← unit tests for ETL transform logic
 ```
 
 See commit `a4f3e2...` (or click my profile in Insights → Contributors) 
