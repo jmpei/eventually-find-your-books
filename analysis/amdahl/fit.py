@@ -19,7 +19,7 @@ from typing import List, Tuple
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 
-def amdahl_speedup(n: int, f: float) -> float:
+def amdahl_speedup(n: float, f: float) -> float:
     """Ideal speedup at N workers given serial fraction f."""
     return 1.0 / (f + (1.0 - f) / n)
 
@@ -62,7 +62,9 @@ def analyze(csv_path: Path = RESULTS_DIR / "speedup.csv") -> dict:
     points = [(float(r["n_workers"]), float(r["speedup"])) for r in rows]
     f_lsq = fit_serial_fraction(points)
 
-    base = next(r for r in rows if int(r["n_workers"]) == 1)
+    base = next((r for r in rows if int(r["n_workers"]) == 1), None)
+    if base is None:
+        raise ValueError("CSV must contain a row with n_workers=1 for phase profiling")
     f_phase = serial_fraction_from_phases(
         float(base["aggregate_s"]), float(base["total_s"])
     )
@@ -93,6 +95,7 @@ def plot(csv_path: Path = RESULTS_DIR / "speedup.csv") -> Path:
     plt.legend()
     out = RESULTS_DIR / "speedup.png"
     plt.savefig(out, dpi=120, bbox_inches="tight")
+    plt.close()
     return out
 
 
