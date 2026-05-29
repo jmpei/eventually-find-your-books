@@ -38,7 +38,8 @@ def iter_jsonl(path: str) -> Iterator[dict]:
                 continue
 
 
-def load_books(file_path: str, table_name: str, region: str | None = None):
+def load_books(file_path: str, table_name: str, region: str | None = None,
+               endpoint_url: str | None = None):
     """
     Load books from JSONL file into DynamoDB using BatchWrite (25 items per request).
     """
@@ -52,11 +53,12 @@ def load_books(file_path: str, table_name: str, region: str | None = None):
     print()
 
     # Create DynamoDB resource
+    kwargs = {}
     if region:
-        dynamodb = boto3.resource("dynamodb", region_name=region)
-    else:
-        dynamodb = boto3.resource("dynamodb")
-
+        kwargs["region_name"] = region
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
+    dynamodb = boto3.resource("dynamodb", **kwargs)
     table = dynamodb.Table(table_name)
 
     total = 0
@@ -110,9 +112,11 @@ def main():
         required=False,
         help="AWS region, e.g. us-east-1 (optional if already configured)",
     )
+    parser.add_argument("--endpoint-url", required=False,
+                        help="DynamoDB endpoint, e.g. http://localhost:8001 for DynamoDB Local")
 
     args = parser.parse_args()
-    load_books(args.file, args.table, args.region)
+    load_books(args.file, args.table, args.region, args.endpoint_url)
 
 
 if __name__ == "__main__":

@@ -48,3 +48,6 @@ terraform.tfstate.backup
 .DS_Store
 Thumbs.db
 Icon?
+
+analysis/amdahl/results/*.csv
+analysis/amdahl/results/*.png

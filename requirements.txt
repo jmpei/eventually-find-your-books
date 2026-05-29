@@ -7,3 +7,5 @@ pydantic-settings
 numpy
 scipy
 python-dotenv
+pytest
+matplotlib
