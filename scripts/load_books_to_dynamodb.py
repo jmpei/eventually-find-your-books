@@ -58,6 +58,8 @@ def load_books(file_path: str, table_name: str, region: str | None = None,
         kwargs["region_name"] = region
     if endpoint_url:
         kwargs["endpoint_url"] = endpoint_url
+        kwargs.setdefault("aws_access_key_id", "local")
+        kwargs.setdefault("aws_secret_access_key", "local")
     dynamodb = boto3.resource("dynamodb", **kwargs)
     table = dynamodb.Table(table_name)
 
