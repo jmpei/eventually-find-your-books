@@ -27,7 +27,7 @@ supporting 50,000+ books with A-Z sharding capability.
 
 ### Technology
 - **Database**: Amazon DynamoDB
-- **Backend**: Go 1.21+
+- **Backend**: Python 3.11
 - **Data Source**: Open Library API
 
 ---
@@ -55,7 +55,7 @@ supporting 50,000+ books with A-Z sharding capability.
 | title | String | Yes | Book title |
 | title_prefix | String | Yes | First letter (A-Z, 0) for sharding |
 | title_lower | String | Yes | Lowercase title for search |
-| authors | List<Map> | Yes | `[{name: "..."}]` |
+| authors | List<Map> | Yes | `[{author_id, author_name}]` |
 | isbn_13 | List<String> | Yes | ISBN-13 identifiers |
 | first_publish_year | Number | Optional | Publication year (nullable) |
 | subjects | List<String> | Optional | Genre/topic tags |
@@ -85,18 +85,92 @@ supporting 50,000+ books with A-Z sharding capability.
 ```
 
 ### 2.2 Ratings Table
-*To be implemented in Week 3*
+
+#### Table Configuration
+```json
+{
+  "TableName": "Ratings",
+  "BillingMode": "PAY_PER_REQUEST"
+}
+```
+
+#### Primary Key
+- **Partition Key**: `user_id` (String, HASH)
+- **Sort Key**: `book_id` (String, RANGE)
+
+#### Attributes
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| user_id | String | Yes | User identifier (PK HASH) |
+| book_id | String | Yes | Book identifier (PK RANGE) |
+| rating | Number | Yes | Rating value |
+| created_at | String | Yes | ISO 8601 timestamp |
+
+#### Global Secondary Index
+
+**BookRatingsIndex**
+```json
+{
+  "IndexName": "BookRatingsIndex",
+  "KeySchema": [
+    {"AttributeName": "book_id", "KeyType": "HASH"}
+  ],
+  "Projection": {"ProjectionType": "ALL"}
+}
+```
+**Purpose**: Query all ratings for a given book.
+
+#### Additional Configuration
+- PITR enabled; SSE enabled
+
+---
 
 ### 2.3 UserProfiles Table
-*To be implemented in Week 3-4*
+
+#### Table Configuration
+```json
+{
+  "TableName": "UserProfiles",
+  "BillingMode": "PAY_PER_REQUEST"
+}
+```
+
+#### Primary Key
+- **Partition Key**: `user_id` (String, HASH)
+
+#### Attributes
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| user_id | String | Yes | User identifier (PK) |
+
+#### Additional Configuration
+- No GSI. Username/email indexes could be added later if needed.
+- PITR enabled; SSE enabled
 
 ---
 
 ## 3. Indexing
 
-### TitlePrefixIndex (Global Secondary Index)
+### TitleLowerIndex (Global Secondary Index — Books table)
 
-**Purpose**: Enable A-Z sharding for Week 2 parallel processing
+**Purpose**: Case-insensitive title search.
+```json
+{
+  "IndexName": "TitleLowerIndex",
+  "KeySchema": [
+    {"AttributeName": "title_lower", "KeyType": "HASH"}
+  ],
+  "Projection": {"ProjectionType": "ALL"}
+}
+```
+
+---
+
+### TitlePrefixIndex (Global Secondary Index — Books table)
+
+**Purpose**: Enable A-Z sharding for parallel processing.
 ```json
 {
   "IndexName": "TitlePrefixIndex",
@@ -113,6 +187,21 @@ Task 1: Query(title_prefix="A") → Books starting with A
 Task 2: Query(title_prefix="B") → Books starting with B
 ...
 Task 26: Query(title_prefix="Z") → Books starting with Z
+```
+
+---
+
+### BookRatingsIndex (Global Secondary Index — Ratings table)
+
+**Purpose**: Per-book rating lookups; query all ratings for a given book.
+```json
+{
+  "IndexName": "BookRatingsIndex",
+  "KeySchema": [
+    {"AttributeName": "book_id", "KeyType": "HASH"}
+  ],
+  "Projection": {"ProjectionType": "ALL"}
+}
 ```
 
 ---
@@ -143,8 +232,8 @@ DynamoDB book_id: "OL45883W"
 | Operation | Description | Use Case |
 |-----------|-------------|----------|
 | GetItem | Get book by book_id | Display book details |
-| Query (GSI) | Query by title_prefix | Week 2 sharding (26 workers) |
-| UpdateItem | Update avg_rating, rating_count | Week 3 ratings |
+| Query (GSI) | Query by title_prefix | A-Z sharding (26 workers) |
+| UpdateItem | Update avg_rating, rating_count | ratings ingestion |
 
 ---
 
@@ -169,7 +258,7 @@ DynamoDB book_id: "OL45883W"
 ## 7. Key Design Decisions
 
 ### Why `title_prefix` field?
-- **Week 2 Requirement**: 26 ECS tasks for A-Z parallel processing
+- Enables 26-way A-Z parallel processing (one ECS task per letter partition)
 - Each task queries one letter partition
 - Enables ~26× speedup for parallel searches
 
