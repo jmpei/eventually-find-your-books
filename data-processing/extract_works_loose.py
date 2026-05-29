@@ -44,6 +44,21 @@ import re
 from typing import Iterable, Optional, Dict, Any, List
 from collections import Counter
 
+# Year validity range used in extract_year
+YEAR_MIN = 1000
+YEAR_MAX = 2025
+
+# Weights used in get_popularity_score
+EDITION_WEIGHT = 10
+RATINGS_WEIGHT = 5
+COVER_BONUS = 20
+
+# Maximum number of subjects kept per book record
+SUBJECT_LIMIT = 10
+
+# Candidate over-fetch multiplier relative to the requested limit
+CANDIDATE_MULTIPLIER = 5
+
 
 def open_maybe_gzip(path: str) -> Iterable[str]:
     """Open file with or without gzip based on extension."""
@@ -69,7 +84,11 @@ def extract_title_prefix(title: str) -> str:
 
 
 def extract_year(first_publish_date) -> Optional[int]:
-    """Extract year from date string."""
+    """Extract a four-digit year from a date-like string.
+
+    Returns the year as an int if it falls within [YEAR_MIN, YEAR_MAX],
+    otherwise returns None.
+    """
     if not isinstance(first_publish_date, str):
         return None
     m = re.search(r"\d{4}", first_publish_date)
@@ -77,7 +96,7 @@ def extract_year(first_publish_date) -> Optional[int]:
         return None
     try:
         year = int(m.group(0))
-        if 1000 <= year <= 2025:
+        if YEAR_MIN <= year <= YEAR_MAX:
             return year
     except ValueError:
         pass
@@ -178,20 +197,32 @@ def is_english_book(work_json: dict) -> bool:
 
 
 def get_popularity_score(work_json: dict) -> int:
-    """Simple popularity score combining edition_count, ratings_count, subjects, and cover."""
+    """Compute a simple popularity score for ranking candidates.
+
+    Score = edition_count * EDITION_WEIGHT
+           + ratings_count * RATINGS_WEIGHT
+           + len(subjects)
+           + COVER_BONUS if at least one cover exists.
+
+    Non-integer edition_count or ratings_count fields contribute 0.
+    """
     score = 0
     if isinstance(work_json.get("edition_count"), int):
-        score += work_json["edition_count"] * 10
+        score += work_json["edition_count"] * EDITION_WEIGHT
     if isinstance(work_json.get("ratings_count"), int):
-        score += work_json["ratings_count"] * 5
+        score += work_json["ratings_count"] * RATINGS_WEIGHT
     score += len(work_json.get("subjects") or [])
     if work_json.get("covers"):
-        score += 20
+        score += COVER_BONUS
     return score
 
 
 def extract_description(work_json: dict) -> Optional[str]:
-    """Extract description if available (string or dict)."""
+    """Extract a plain-text description from a work, if present.
+
+    The field may be a bare string or a dict containing a "value" key.
+    Returns None when the field is absent or in an unexpected format.
+    """
     desc = work_json.get("description")
     if isinstance(desc, dict):
         return desc.get("value")
@@ -201,7 +232,7 @@ def extract_description(work_json: dict) -> Optional[str]:
 
 
 def extract_cover_id(work_json: dict) -> Optional[int]:
-    """Extract first cover id from covers[]."""
+    """Extract the first integer cover id from covers[], or None."""
     covers = work_json.get("covers") or []
     if isinstance(covers, list) and covers:
         first = covers[0]
@@ -210,8 +241,63 @@ def extract_cover_id(work_json: dict) -> Optional[int]:
     return None
 
 
+def _build_record(item: Dict[str, Any], work: dict) -> Optional[Dict[str, Any]]:
+    """Build the output JSONL record for a single candidate.
+
+    Args:
+        item: Candidate dict produced during collection (contains title,
+              authors, title_prefix, key).
+        work: Raw work JSON for the same candidate.
+
+    Returns:
+        A dict ready to be serialised as a JSONL line, or None if the record
+        should be skipped (no valid string subjects found).
+    """
+    raw_key = item["key"]
+    book_id = raw_key.split("/")[-1] if isinstance(raw_key, str) else raw_key
+
+    subjects = [
+        s for s in (work.get("subjects") or [])
+        if isinstance(s, str)
+    ][:SUBJECT_LIMIT]
+    if not subjects:
+        return None  # keep at least some context, but looser
+
+    description = extract_description(work)  # optional
+    cover_id = extract_cover_id(work)
+
+    record: Dict[str, Any] = {
+        "book_id": book_id,
+        "title": item["title"],
+        "title_prefix": item["title_prefix"],
+        "title_lower": item["title"].lower(),
+        "authors": item["authors"],
+        "isbn_13": work.get("isbn_13") or [],
+        "first_publish_year": extract_year(work.get("first_publish_date")),
+        "subjects": subjects,
+        "language": "en",
+        "avg_rating": 0.0,
+        "rating_count": 0,
+    }
+
+    if description:
+        record["description"] = description
+    if cover_id:
+        record["cover_id"] = cover_id
+
+    return record
+
+
 def process_works_dump(input_path: str, authors_path: str, output_path: str, limit: int = 50000):
-    """Main extraction function."""
+    """Extract top-N English books from an Open Library works dump (loose filters).
+
+    Steps:
+      1. Load author name map from the authors dump.
+      2. Scan the works dump and collect English-language candidates that pass
+         basic filters (title, key, at least one author, A-Z title prefix).
+      3. Sort candidates by popularity score (descending).
+      4. Write up to `limit` records; records without subjects are skipped.
+    """
     print("=" * 70)
     print("OPEN LIBRARY WORKS EXTRACTOR (LOOSE VERSION)")
     print("=" * 70)
@@ -273,7 +359,7 @@ def process_works_dump(input_path: str, authors_path: str, output_path: str, lim
         if len(candidates) % 20000 == 0:
             print(f"  Collected: {len(candidates):,} candidates...")
 
-        if len(candidates) >= limit * 5:
+        if len(candidates) >= limit * CANDIDATE_MULTIPLIER:
             print(f"  Reached {len(candidates):,} candidates, stopping early.")
             break
 
@@ -290,39 +376,11 @@ def process_works_dump(input_path: str, authors_path: str, output_path: str, lim
             if count_written >= limit:
                 break
 
-            work = item["work"]
-            raw_key = item["key"]
-            book_id = raw_key.split("/")[-1] if isinstance(raw_key, str) else raw_key
-            description = extract_description(work)  # optional
-            cover_id = extract_cover_id(work)
+            record = _build_record(item, item["work"])
+            if record is None:
+                continue
 
-            subjects = [
-                s for s in (work.get("subjects") or [])
-                if isinstance(s, str)
-            ][:10]
-            if not subjects:
-                continue  # keep at least some context, but looser
-
-            simplified: Dict[str, Any] = {
-                "book_id": book_id,
-                "title": item["title"],
-                "title_prefix": item["title_prefix"],
-                "title_lower": item["title"].lower(),
-                "authors": item["authors"],
-                "isbn_13": work.get("isbn_13") or [],
-                "first_publish_year": extract_year(work.get("first_publish_date")),
-                "subjects": subjects,
-                "language": "en",
-                "avg_rating": 0.0,
-                "rating_count": 0,
-            }
-
-            if description:
-                simplified["description"] = description
-            if cover_id:
-                simplified["cover_id"] = cover_id
-
-            out_f.write(json.dumps(simplified, ensure_ascii=False) + "\n")
+            out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
             count_written += 1
             prefix_list.append(item["title_prefix"])
 

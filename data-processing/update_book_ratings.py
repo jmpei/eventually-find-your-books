@@ -17,6 +17,10 @@ import json
 from typing import Iterable, Dict, Tuple, List
 from collections import defaultdict
 
+# Valid rating range; entries outside this range are discarded as invalid
+RATING_MIN = 0.5
+RATING_MAX = 5.0
+
 
 def open_maybe_gzip(path: str) -> Iterable[str]:
     """Open a plain text or gzip-compressed file and yield lines."""
@@ -75,7 +79,7 @@ def load_ratings(ratings_path: str) -> Tuple[Dict[str, float], Dict[str, int]]:
             continue
 
         # Discard obviously invalid ratings
-        if rating < 0.5 or rating > 5.0:
+        if rating < RATING_MIN or rating > RATING_MAX:
             continue
 
         sum_ratings[work_id] += rating
@@ -159,6 +163,13 @@ def update_and_select_top_books(
 
     # Sort key: has_rating, rating_count, avg_rating (all descending)
     def sort_key(b: dict):
+        """Return a tuple used as the descending sort key for a book.
+
+        Priority order (highest first):
+          1. has_rating  — books with any ratings before unrated books
+          2. rating_count — more ratings first
+          3. avg_rating   — higher average rating first
+        """
         rc = b.get("rating_count", 0)
         ar = b.get("avg_rating", 0.0)
         has_rating = 1 if rc > 0 else 0

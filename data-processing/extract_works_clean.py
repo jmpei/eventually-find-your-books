@@ -9,6 +9,21 @@ import re
 from typing import Iterable, Optional, Dict, Any, List
 from collections import Counter
 
+# Year validity range used in extract_year
+YEAR_MIN = 1000
+YEAR_MAX = 2025
+
+# Weights used in get_popularity_score
+EDITION_WEIGHT = 10
+RATINGS_WEIGHT = 5
+COVER_BONUS = 20
+
+# Maximum number of subjects kept per book record
+SUBJECT_LIMIT = 10
+
+# Candidate over-fetch multiplier relative to the requested limit
+CANDIDATE_MULTIPLIER = 5
+
 
 def open_maybe_gzip(path: str) -> Iterable[str]:
     """Open a plain text or gzip-compressed file and yield lines."""
@@ -40,7 +55,11 @@ def extract_title_prefix(title: str) -> str:
 
 
 def extract_year(first_publish_date) -> Optional[int]:
-    """Extract a four-digit year from a date-like string."""
+    """Extract a four-digit year from a date-like string.
+
+    Returns the year as an int if it falls within [YEAR_MIN, YEAR_MAX],
+    otherwise returns None.
+    """
     if not isinstance(first_publish_date, str):
         return None
 
@@ -50,7 +69,7 @@ def extract_year(first_publish_date) -> Optional[int]:
 
     try:
         year = int(m.group(0))
-        if 1000 <= year <= 2025:
+        if YEAR_MIN <= year <= YEAR_MAX:
             return year
     except ValueError:
         pass
@@ -206,26 +225,30 @@ def is_english_book(work_json: dict) -> bool:
 
 
 def get_popularity_score(work_json: dict) -> int:
-    """
-    Compute a simple popularity score for a work.
+    """Compute a simple popularity score for ranking candidates.
 
-    Higher score indicates a more prominent work.
+    Score = edition_count * EDITION_WEIGHT
+           + ratings_count * RATINGS_WEIGHT
+           + len(subjects)
+           + COVER_BONUS if at least one cover exists.
+
+    Non-integer edition_count or ratings_count fields contribute 0.
     """
     score = 0
 
     edition_count = work_json.get("edition_count", 0)
     if isinstance(edition_count, int):
-        score += edition_count * 10
+        score += edition_count * EDITION_WEIGHT
 
     ratings = work_json.get("ratings_count", 0)
     if isinstance(ratings, int):
-        score += ratings * 5
+        score += ratings * RATINGS_WEIGHT
 
     subjects = work_json.get("subjects") or []
     score += len(subjects)
 
     if work_json.get("covers"):
-        score += 20
+        score += COVER_BONUS
 
     return score
 
@@ -341,7 +364,7 @@ def process_works_dump(
         if len(candidates) % 10_000 == 0:
             print(f"  Collected: {len(candidates):,} basic-filtered books (line {line_num:,})")
 
-        if len(candidates) >= limit * 5:
+        if len(candidates) >= limit * CANDIDATE_MULTIPLIER:
             print(f"  Enough candidates collected ({len(candidates):,})")
             break
 
@@ -382,7 +405,7 @@ def process_works_dump(
             subjects = [
                 s for s in (work.get("subjects") or [])
                 if isinstance(s, str)
-            ][:10]
+            ][:SUBJECT_LIMIT]
             if not subjects:
                 continue
 
