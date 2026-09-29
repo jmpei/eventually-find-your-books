@@ -2,7 +2,7 @@
 
 **Version:** 1.0  
 **Last Updated:** 2025-11-05  
-**Author:** Jiaming(Theodore) Pei  
+**Author:** Jiaming Pei  
 
 ---
 

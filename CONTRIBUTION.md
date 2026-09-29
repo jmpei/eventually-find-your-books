@@ -1,4 +1,4 @@
-# My Contribution — Theodore (Jiaming) Pei
+# My Contribution — Jiaming Pei
 
 This project is a 4-person team effort for the CS6650 Distributed 
 Systems final project at Northeastern University. I owned the 
@@ -102,4 +102,4 @@ for the full code change.
 | Rating API + Infrastructure setup | [@modimansi](https://github.com/modimansi) (Mansi) |
 | Search service + Book detail service | [@MartinJHan](https://github.com/MartinJHan) (Martin) |
 | ML / Recommendation + Performance testing | [@dsnahil](https://github.com/dsnahil) (Snahil) |
-| **Data Pipeline + AWS Infrastructure** | **[@TomatoesSuck](https://github.com/TomatoesSuck) (Theodore — me)** |
+| **Data Pipeline + AWS Infrastructure** | **[@TomatoesSuck](https://github.com/TomatoesSuck) (Jiaming — me)** |

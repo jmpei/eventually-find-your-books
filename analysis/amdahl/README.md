@@ -1,6 +1,6 @@
 # Amdahl's Law Analysis — A-Z Scatter-Gather Search
 
-**Author:** Jiaming (Theodore) Pei
+**Author:** Jiaming Pei
 
 ---
 
